@@ -7,6 +7,7 @@ from io import BytesIO
 from src.parser import parse_resume, extract_text_from_file
 from src.report import generate_match_report
 from src.utils import clear_folder
+from src.bedrock_llm import set_bedrock_credentials  # New utility
 
 # Folders
 RESUME_UPLOAD_FOLDER = "data/resumes/"
@@ -19,29 +20,37 @@ os.makedirs(SELECTED_PROFILE_FOLDER, exist_ok=True)
 
 # Title
 st.title("🔍 AI Profile Syncer")
-#st.divider()
 st.write("Upload multiple Job Descriptions and Resumes. Supports .pdf, .docx, .txt, and .zip formats. Each resume will be matched against each JD using skill overlap and embedding similarity.")
 st.divider()
 st.sidebar.info("🚀 Powered by Capgemini")
-st.sidebar.header("Upload Files")
+st.sidebar.header("🔐 AWS Credentials")
 
-# Upload JDs
+# === NEW: AWS API Key Inputs ===
+# aws_access_key = st.sidebar.text_input("AWS Access Key ID", type="password")
+# aws_secret_key = st.sidebar.text_input("AWS Secret Access Key", type="password")
+# aws_region = st.sidebar.text_input("AWS Region", value="us-east-1")
+with st.sidebar.expander("🔐 AWS Credentials (Required)"):
+    st.session_state.aws_access_key = st.text_input("AWS Access Key ID", type="password")
+    st.session_state.aws_secret_key = st.text_input("AWS Secret Access Key", type="password")
+    st.session_state.aws_region = st.text_input("AWS Region", value="us-east-1")
+
+# === Uploads ===
+st.sidebar.header("📁 Upload Files")
+
 jd_input = st.sidebar.file_uploader(
     "Upload Job Description(s) (TXT, PDF, DOCX or ZIP)",
     type=["txt", "pdf", "docx", "zip"]
 )
 
-# Upload Resumes
 resume_input = st.sidebar.file_uploader(
     "Upload Resumes (PDF, DOCX or ZIP)",
     type=["pdf", "docx", "zip"],
     accept_multiple_files=False
 )
 
-# Match score threshold
-min_match_score = st.sidebar.number_input("Enter Minimum Resume Match Score (%)", min_value=0, max_value=100, value=70)
+min_match_score = st.sidebar.number_input("Minimum Resume Match Score (%)", min_value=0, max_value=100, value=70)
 
-# Session state variables
+# Session state
 if "match_reports" not in st.session_state:
     st.session_state.match_reports = {}
 if "selected_profiles" not in st.session_state:
@@ -68,70 +77,82 @@ def save_file(uploaded_file, save_dir):
         f.write(uploaded_file.getvalue())
     return [file_path]
 
-# Processing button
+# Processing logic
 if st.sidebar.button("Process Matching"):
-    clear_folder(RESUME_UPLOAD_FOLDER)
-    clear_folder(JOB_DESC_UPLOAD_FOLDER)
-    clear_folder(SELECTED_PROFILE_FOLDER)
-    st.session_state.match_reports.clear()
-    st.session_state.selected_profiles.clear()
-    st.session_state.processed = False
+    if not (st.session_state.aws_access_key and st.session_state.aws_secret_key and st.session_state.aws_region):
+        st.error("❌ Please provide AWS credentials and region to proceed.")
+    else:
+        # Set credentials dynamically
+        set_bedrock_credentials(st.session_state.aws_access_key, st.session_state.aws_secret_key, st.session_state.aws_region)
 
-    jd_paths, resume_paths = [], []
+        clear_folder(RESUME_UPLOAD_FOLDER)
+        clear_folder(JOB_DESC_UPLOAD_FOLDER)
+        clear_folder(SELECTED_PROFILE_FOLDER)
+        st.session_state.match_reports.clear()
+        st.session_state.selected_profiles.clear()
+        st.session_state.processed = False
 
-    with st.spinner(text="In progress..."):
-        if jd_input:
-            if jd_input.name.endswith(".zip"):
-                jd_paths = extract_files_from_zip(jd_input, JOB_DESC_UPLOAD_FOLDER, ["txt", "pdf", "docx"])
+        jd_paths, resume_paths = [], []
+
+        with st.spinner(text="Matching in progress..."):
+            if jd_input:
+                if jd_input.name.endswith(".zip"):
+                    jd_paths = extract_files_from_zip(jd_input, JOB_DESC_UPLOAD_FOLDER, ["txt", "pdf", "docx"])
+                else:
+                    jd_paths = save_file(jd_input, JOB_DESC_UPLOAD_FOLDER)
+
+            if resume_input:
+                if resume_input.name.endswith(".zip"):
+                    resume_paths = extract_files_from_zip(resume_input, RESUME_UPLOAD_FOLDER, ["pdf", "docx"])
+                else:
+                    resume_paths = save_file(resume_input, RESUME_UPLOAD_FOLDER)
+
+            if not jd_paths or not resume_paths:
+                st.warning("Please upload both job descriptions and resumes!")
             else:
-                jd_paths = save_file(jd_input, JOB_DESC_UPLOAD_FOLDER)
+                resume_texts = {
+                    os.path.basename(path): parse_resume(path)
+                    for path in resume_paths
+                }
 
-        if resume_input:
-            if resume_input.name.endswith(".zip"):
-                resume_paths = extract_files_from_zip(resume_input, RESUME_UPLOAD_FOLDER, ["pdf", "docx"])
-            else:
-                resume_paths = save_file(resume_input, RESUME_UPLOAD_FOLDER)
+                for jd_path in jd_paths:
+                    jd_text = extract_text_from_file(jd_path)
+                    #results = generate_match_report(resume_texts, jd_text)
+                    results = generate_match_report(
+                        resume_texts, 
+                        jd_text, 
+                        aws_access_key=st.session_state.aws_access_key,
+                        aws_secret_key=st.session_state.aws_secret_key,
+                        aws_region=st.session_state.aws_region
+                    )
 
-        if not jd_paths or not resume_paths:
-            st.warning("Please upload both job descriptions and resumes!")
-        else:
-            # Parse resume texts once
-            resume_texts = {}
-            for resume_path in resume_paths:
-                resume_texts[os.path.basename(resume_path)] = parse_resume(resume_path)
+                    selected_resumes = []
+                    detailed_data = []
 
-            # For each JD
-            for jd_path in jd_paths:
-                jd_text = extract_text_from_file(jd_path)
-                results = generate_match_report(resume_texts, jd_text)
+                    for result in results:
+                        if result["embedding_score"] >= min_match_score:
+                            selected_resumes.append(result["resume"])
+                            src_path = os.path.join(RESUME_UPLOAD_FOLDER, result["resume"])
+                            dst_path = os.path.join(SELECTED_PROFILE_FOLDER, result["resume"])
+                            if os.path.exists(src_path):
+                                with open(src_path, "rb") as src, open(dst_path, "wb") as dst:
+                                    dst.write(src.read())
 
-                selected_resumes = []
-                detailed_data = []
+                        detailed_data.append({
+                            "Resume": result["resume"],
+                            "Skills Match (%)": result["match_score"],
+                            "Resume Match (%)": result["embedding_score"],
+                            "All Resume Skills": ", ".join(sorted(result["all_resume_skills"])),
+                            "Matching Skills with JD": ", ".join(sorted(result["matched_skills"])),
+                            "Missing Skills from JD": ", ".join(sorted(result["missing_skills"]))
+                        })
 
-                for result in results:
-                    if result["embedding_score"] >= min_match_score:
-                        selected_resumes.append(result["resume"])
-                        src_path = os.path.join(RESUME_UPLOAD_FOLDER, result["resume"])
-                        dst_path = os.path.join(SELECTED_PROFILE_FOLDER, result["resume"])
-                        if os.path.exists(src_path):
-                            with open(src_path, "rb") as src, open(dst_path, "wb") as dst:
-                                dst.write(src.read())
+                    jd_name = os.path.splitext(os.path.basename(jd_path))[0].replace(" ", "_")
+                    st.session_state.match_reports[jd_name] = pd.DataFrame(detailed_data)
+                    st.session_state.selected_profiles[jd_name] = selected_resumes
+                    st.session_state.processed = True
 
-                    detailed_data.append({
-                        "Resume": result["resume"],
-                        "Skills Match (%)": result["match_score"],
-                        "Resume Match (%)": result["embedding_score"],
-                        "All Resume Skills": ", ".join(sorted(result["all_resume_skills"])),
-                        "Matching Skills with JD": ", ".join(sorted(result["matched_skills"])),
-                        "Missing Skills from JD": ", ".join(sorted(result["missing_skills"]))
-                    })
-
-                jd_name = os.path.splitext(os.path.basename(jd_path))[0].replace(" ", "_")
-                st.session_state.match_reports[jd_name] = pd.DataFrame(detailed_data)
-                st.session_state.selected_profiles[jd_name] = selected_resumes
-                st.session_state.processed = True
-
-# Display Reports
+# Display Results
 if st.session_state.processed:
     for jd_name, match_df in st.session_state.match_reports.items():
         st.subheader(f"📊 Matching Report for JD: {jd_name}")

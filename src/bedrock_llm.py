@@ -4,10 +4,16 @@ import re
 import time
 import botocore.exceptions
 from src.logger import logger
-from config import AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION
+#from config import AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION
+import os
+
+def set_bedrock_credentials(access_key, secret_key, region):
+    os.environ["AWS_ACCESS_KEY_ID"] = access_key
+    os.environ["AWS_SECRET_ACCESS_KEY"] = secret_key
+    os.environ["AWS_REGION"] = region
 
 
-def run_skill_extraction_prompt(text, retries=3):
+def run_skill_extraction_prompt(text, aws_access_key, aws_secret_key, aws_region, retries=3):
     """
     Calls Anthropic Claude v2 via Bedrock to extract technical skills
     from a given resume or job description text.
@@ -17,13 +23,17 @@ def run_skill_extraction_prompt(text, retries=3):
     """
     #client = boto3.client(service_name='bedrock-runtime')
 
-    from config import AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION
-
+    # client = boto3.client(
+    #     service_name='bedrock-runtime',
+    #     aws_access_key_id=AWS_ACCESS_KEY,
+    #     aws_secret_access_key=AWS_SECRET_KEY,
+    #     region_name=AWS_REGION
+    # )
     client = boto3.client(
         service_name='bedrock-runtime',
-        aws_access_key_id=AWS_ACCESS_KEY,
-        aws_secret_access_key=AWS_SECRET_KEY,
-        region_name=AWS_REGION
+        aws_access_key_id=aws_access_key,
+        aws_secret_access_key=aws_secret_key,
+        region_name=aws_region
     )
 
     model_id = 'anthropic.claude-v2'

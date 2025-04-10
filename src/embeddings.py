@@ -2,19 +2,19 @@ import boto3
 import json
 import time
 import botocore.exceptions
-from config import AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION
+#from config import AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION
 
-# Initialize AWS Bedrock client
-bedrock_client = boto3.client("bedrock-runtime",
-                              aws_access_key_id=AWS_ACCESS_KEY,
-                              aws_secret_access_key=AWS_SECRET_KEY,
-                              region_name=AWS_REGION)
 
-def generate_embeddings(text, retries=3):
+def generate_embeddings(text, aws_access_key, aws_secret_key, aws_region, retries=3):
     """Convert text into embeddings using Titan Embeddings G1 - Text with retry logic."""
+    client = boto3.client("bedrock-runtime",
+                          aws_access_key_id=aws_access_key,
+                          aws_secret_access_key=aws_secret_key,
+                          region_name=aws_region)
+    
     for attempt in range(retries):
         try:
-            response = bedrock_client.invoke_model(
+            response = client.invoke_model(
                 modelId="amazon.titan-embed-text-v1",
                 contentType="application/json",
                 accept="application/json",
@@ -29,4 +29,4 @@ def generate_embeddings(text, retries=3):
                 time.sleep(wait_time)
             else:
                 raise e
-
+            
