@@ -10,6 +10,7 @@ from src.utils import clear_folder
 from src.bedrock_llm import set_bedrock_credentials  # New utility
 
 # Folders
+#
 RESUME_UPLOAD_FOLDER = "data/resumes/"
 JOB_DESC_UPLOAD_FOLDER = "data/job_descriptions/"
 SELECTED_PROFILE_FOLDER = "selected_profile/"
