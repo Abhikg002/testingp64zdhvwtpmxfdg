@@ -2,16 +2,16 @@ import boto3
 import json
 import time
 import botocore.exceptions
-#from config import AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION
+import streamlit as st
 
-
+@st.cache_data(show_spinner=False)
 def generate_embeddings(text, aws_access_key, aws_secret_key, aws_region, retries=3):
     """Convert text into embeddings using Titan Embeddings G1 - Text with retry logic."""
     client = boto3.client("bedrock-runtime",
                           aws_access_key_id=aws_access_key,
                           aws_secret_access_key=aws_secret_key,
                           region_name=aws_region)
-    
+
     for attempt in range(retries):
         try:
             response = client.invoke_model(
@@ -29,4 +29,3 @@ def generate_embeddings(text, aws_access_key, aws_secret_key, aws_region, retrie
                 time.sleep(wait_time)
             else:
                 raise e
-            
