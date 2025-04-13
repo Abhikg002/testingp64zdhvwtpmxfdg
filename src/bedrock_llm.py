@@ -41,7 +41,12 @@ def run_skill_extraction_prompt(text, aws_access_key, aws_secret_key, aws_region
     content_type = 'application/json'
 
     prompt = f"""
-Human: Extract only the technical skills from the following text. These should include programming languages, frameworks, libraries, software tools, cloud platforms, and technical certifications. Return the skills as a valid Python list of strings. Do not include soft skills, company names, locations, or general strengths.
+Human: Extract the following details from the given resume text:
+Full Name, Email address, Location, Years of professional experience, Technical skills (programming languages, frameworks, libraries, software tools, cloud platforms, and technical certifications only; exclude soft skills, company names, locations, and general strengths)
+Return the result in a table format with the following columns:
+Name | Email | Location | Years of Experience | Technical Skills
+Ensure technical skills are returned as a valid Python list of strings in the "Technical Skills" column.
+
 
 Text:
 \"\"\"{text}\"\"\"
@@ -66,14 +71,40 @@ Assistant:"""
             response_body = json.loads(response['body'].read())
             output_text = response_body.get('completion', '')
 
+            name = ''
+            email = ''
+            location = ''
+            years_of_experience = ''
             skills_list = []
-            match = re.search(r"\[([^\]]+)\]", output_text)
-            if match:
-                raw_items = match.group(1).split(',')
-                skills_list = [item.strip().strip("'\"").lower() for item in raw_items if item.strip()]
+            parts = []
 
-            logger.info(f"LLM Extracted Skills: {text}")
-            return list(set(skills_list))  # remove duplicates
+            lines = output_text.strip().split('\n')
+            for line in lines:
+                if '|' in line and '@' in line:  # likely the data line
+                    parts = [p.strip() for p in line.split('|')]
+                    if len(parts) >= 5:
+                        name = parts[1]
+                        email = parts[2]
+                        location = parts[3]
+                        years_of_experience = parts[4]
+                    break
+
+
+            # Extract Skills 
+            skills_match = re.search(r"\[([^\]]+)\]", output_text)
+            if skills_match:
+                raw_items = skills_match.group(1).split(',')
+                skills_list = [item.strip().strip("'\"").lower() for item in raw_items if item.strip()]
+                skills_list = list(set(skills_list))
+
+            logger.info(f"LLM Extracted: Name : {name}, Email : {email}, Location : {location} Years of Experience : {years_of_experience}, Skills : {skills_list}")
+            return {
+                "Name": name,
+                "Email": email,
+                "Location": location,
+                "Years of Experience": years_of_experience,
+                "Technical Skills": skills_list
+            }
 
         except botocore.exceptions.ClientError as e:
             if attempt < retries - 1:

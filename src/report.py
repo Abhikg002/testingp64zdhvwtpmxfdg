@@ -13,14 +13,15 @@ def generate_match_report(resume_texts, job_text, aws_access_key, aws_secret_key
 
     logger.info("Extracting skills from job description")
     job_skills = extract_skills(job_text, aws_access_key, aws_secret_key, aws_region)
-    job_skills_lower = {skill.lower() for skill in job_skills}
+
+    job_skills_lower = {skill.lower() for skill in job_skills["Technical Skills"]}
 
     for file_name, resume_text in resume_texts.items():
         logger.info(f"Processing resume: {file_name}")
         resume_skills = extract_skills(resume_text, aws_access_key, aws_secret_key, aws_region)
         time.sleep(1.5)
 
-        resume_skills_lower = {skill.lower() for skill in resume_skills}
+        resume_skills_lower = {skill.lower() for skill in resume_skills["Technical Skills"]}
 
         matched_skills = resume_skills_lower.intersection(job_skills_lower)
         missing_skills = job_skills_lower - resume_skills_lower
@@ -31,6 +32,10 @@ def generate_match_report(resume_texts, job_text, aws_access_key, aws_secret_key
 
         results.append({
             "resume": file_name,
+            "name" : resume_skills["Name"],
+            "email": resume_skills["Email"],
+            "location":resume_skills["Location"],
+            "years of experience": resume_skills["Years of Experience"],
             "match_score": skill_match_score,
             "embedding_score": embedding_score,
             "all_resume_skills": list(resume_skills_lower),

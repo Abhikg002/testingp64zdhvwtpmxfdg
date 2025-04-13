@@ -141,6 +141,10 @@ if st.sidebar.button("Process Matching"):
 
                         detailed_data.append({
                             "Resume": result["resume"],
+                            "Name": result["name"],
+                            "Email": result["email"],
+                            "Location": result["location"],
+                            "Years of Experience": result["years of experience"],
                             "Skills Match (%)": result["match_score"],
                             "Resume Match (%)": result["embedding_score"],
                             "All Resume Skills": ", ".join(sorted(result["all_resume_skills"])),
