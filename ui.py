@@ -8,6 +8,7 @@ from src.parser import parse_resume, extract_text_from_file
 from src.report import generate_match_report
 from src.utils import clear_folder
 from src.bedrock_llm import set_bedrock_credentials  # New utility
+import unicodedata
 
 # Folders
 #
@@ -27,14 +28,17 @@ st.sidebar.info("🚀 Powered by Capgemini")
 st.sidebar.header("🔐 AWS Credentials")
 
 # === NEW: AWS API Key Inputs ===
-# aws_access_key = st.sidebar.text_input("AWS Access Key ID", type="password")
-# aws_secret_key = st.sidebar.text_input("AWS Secret Access Key", type="password")
-# aws_region = st.sidebar.text_input("AWS Region", value="us-east-1")
 with st.sidebar.expander("🔐 AWS Credentials (Required)"):
     st.session_state.aws_access_key = st.text_input("AWS Access Key ID", type="password")
     st.session_state.aws_secret_key = st.text_input("AWS Secret Access Key", type="password")
     st.session_state.aws_region = st.text_input("AWS Region", value="us-east-1")
 
+#Clear folder
+if "folders_cleared" not in st.session_state:
+            clear_folder(RESUME_UPLOAD_FOLDER)
+            clear_folder(JOB_DESC_UPLOAD_FOLDER)
+            st.session_state.folders_cleared = True
+            
 # === Uploads ===
 st.sidebar.header("📁 Upload Files")
 
@@ -65,12 +69,16 @@ def extract_files_from_zip(uploaded_zip, save_dir, allowed_ext):
     with zipfile.ZipFile(BytesIO(uploaded_zip.read()), "r") as zip_ref:
         for file_name in zip_ref.namelist():
             if file_name.lower().endswith(tuple(allowed_ext)):
-                full_path = os.path.join(save_dir, file_name)
-                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                # Normalize file name (remove special chars and spaces)
+                safe_name = unicodedata.normalize("NFKD", os.path.basename(file_name)).encode("ascii", "ignore").decode("ascii")
+                safe_name = safe_name.replace(" ", "_")
+                full_path = os.path.join(save_dir, safe_name)
+
                 with open(full_path, "wb") as f:
                     f.write(zip_ref.read(file_name))
                 extracted.append(full_path)
     return extracted
+
 
 def save_file(uploaded_file, save_dir):
     file_path = os.path.join(save_dir, uploaded_file.name)
@@ -78,30 +86,38 @@ def save_file(uploaded_file, save_dir):
         f.write(uploaded_file.getvalue())
     return [file_path]
 
+# Pre-process JD file and populate dropdown
+jd_paths = []
+if jd_input:
+    if jd_input.name.endswith(".zip"):
+        jd_paths = extract_files_from_zip(jd_input, JOB_DESC_UPLOAD_FOLDER, ["txt", "pdf", "docx"])
+    else:
+        jd_paths = save_file(jd_input, JOB_DESC_UPLOAD_FOLDER)
+
+jd_file_map = {os.path.basename(path): path for path in jd_paths}
+selected_jd_name = None
+selected_jd_path = None
+
+if jd_file_map:
+    selected_jd_name = st.sidebar.selectbox("Select Job Description to Match", list(jd_file_map.keys()))
+    selected_jd_path = jd_file_map[selected_jd_name]
+
 # Processing logic
 if st.sidebar.button("Process Matching"):
     if not (st.session_state.aws_access_key and st.session_state.aws_secret_key and st.session_state.aws_region):
         st.error("❌ Please provide AWS credentials and region to proceed.")
     else:
-        # Set credentials dynamically
         set_bedrock_credentials(st.session_state.aws_access_key, st.session_state.aws_secret_key, st.session_state.aws_region)
 
-        clear_folder(RESUME_UPLOAD_FOLDER)
-        clear_folder(JOB_DESC_UPLOAD_FOLDER)
         clear_folder(SELECTED_PROFILE_FOLDER)
         st.session_state.match_reports.clear()
         st.session_state.selected_profiles.clear()
         st.session_state.processed = False
 
-        jd_paths, resume_paths = [], []
+        jd_paths = [selected_jd_path] if selected_jd_path else []
+        resume_paths = []
 
         with st.spinner(text="Matching in progress..."):
-            if jd_input:
-                if jd_input.name.endswith(".zip"):
-                    jd_paths = extract_files_from_zip(jd_input, JOB_DESC_UPLOAD_FOLDER, ["txt", "pdf", "docx"])
-                else:
-                    jd_paths = save_file(jd_input, JOB_DESC_UPLOAD_FOLDER)
-
             if resume_input:
                 if resume_input.name.endswith(".zip"):
                     resume_paths = extract_files_from_zip(resume_input, RESUME_UPLOAD_FOLDER, ["pdf", "docx"])
@@ -118,10 +134,9 @@ if st.sidebar.button("Process Matching"):
 
                 for jd_path in jd_paths:
                     jd_text = extract_text_from_file(jd_path)
-                    #results = generate_match_report(resume_texts, jd_text)
                     results = generate_match_report(
-                        resume_texts, 
-                        jd_text, 
+                        resume_texts,
+                        jd_text,
                         aws_access_key=st.session_state.aws_access_key,
                         aws_secret_key=st.session_state.aws_secret_key,
                         aws_region=st.session_state.aws_region
