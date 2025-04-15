@@ -42,18 +42,29 @@ def run_skill_extraction_prompt(text, aws_access_key, aws_secret_key, aws_region
     content_type = 'application/json'
     prompt = f"""
 Human: Extract the following details from the given resume text:
-Full Name, Email address, Location, Years of professional experience, Technical skills (programming languages, frameworks, libraries, software tools, cloud platforms, and technical certifications only; exclude soft skills, company names, locations, and general strengths)
-Return the result in a table format with the following columns:
+- Full Name
+- Email address
+- Location
+- Years of professional experience
+- Technical skills (include only programming languages, frameworks, libraries, software tools, cloud platforms, and technical certifications. Do not include soft skills, company names, locations, or general strengths)
+
+Please return the result in a table format with the following columns:
 | Name | Email | Location | Years of Experience | Technical Skills |
-If any of the columns is not found then return "Unable to fetch" in place of that.
 
+Rules:
+1. For "Years of Experience":
+   - Identify the start and end dates for each role listed under the "Experience" section.
+   - If a role is marked as "Present" or "Current", treat the end date as today's date.
+   - Combine overlapping or continuous roles appropriately (do not double-count overlapping time periods).
+   - Sum the total time span across all unique work periods and round down the total years to the nearest whole number.
 
+2. If any of the columns (Name, Email, Location, Years of Experience, Technical Skills) are not found in the text, write "Didn't Found" for that column.
 
 Text:
 \"\"\"{text}\"\"\"
 
-Assistant:"""
-
+Assistant:
+"""
     body = json.dumps({
         "prompt": prompt,
         "max_tokens_to_sample": 1000,
@@ -71,8 +82,9 @@ Assistant:"""
             )
             response_body = json.loads(response['body'].read())
             output_text = response_body.get('completion', '')
+            # print("Output : ", output_text)
 
-            line = output_text.strip().split('\n')[4]
+            line = output_text.strip().split('\n')[-1]
             parts = [p.strip() for p in line.split('|')]
             parts = parts[1:-1]
             print("\nParts : ", parts , "\n") 
@@ -84,11 +96,12 @@ Assistant:"""
             skills_list = []
             
             
-            name = parts[0]
-            email = parts[1]
-            location = parts[2]
-            years_of_experience = parts[3]
-            skills_match = parts[4]
+            name = "Didn't Found" if parts[0] == '' else parts[0]
+            
+            email = "Didn't Found" if parts[1] == '' else parts[1]
+            location = "Didn't Found" if parts[2] == '' else parts[2]
+            years_of_experience = "Didn't Found" if parts[3] == '' else parts[3]
+            skills_match = "Didn't Found" if parts[4] == '' else parts[4]
                     
 
             if skills_match:
