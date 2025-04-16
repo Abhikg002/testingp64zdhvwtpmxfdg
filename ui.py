@@ -8,6 +8,7 @@ from src.parser import parse_resume, extract_text_from_file
 from src.report import generate_match_report, extract_skills
 from src.utils import clear_folder
 from src.bedrock_llm import set_bedrock_credentials  # New utility
+import unicodedata
 
 # Folders
 RESUME_UPLOAD_FOLDER = "data/resumes/"
@@ -59,15 +60,35 @@ st.sidebar.info("🚀 Powered by Capgemini")
 
 st.sidebar.header("🔐 AWS Credentials")
 
-# === AWS API Key Inputs ===
+# === NEW: AWS API Key Inputs ===
 with st.sidebar.expander("🔐 AWS Credentials (Required)"):
     st.session_state.aws_access_key = st.text_input("AWS Access Key ID", type="password")
     st.session_state.aws_secret_key = st.text_input("AWS Secret Access Key", type="password")
     st.session_state.aws_region = st.text_input("AWS Region", value="us-east-1")
 
-# Initialize session states
-if "jd_skills" not in st.session_state:
-    st.session_state.jd_skills = {}
+#Clear folder
+if "folders_cleared" not in st.session_state:
+            clear_folder(RESUME_UPLOAD_FOLDER)
+            clear_folder(JOB_DESC_UPLOAD_FOLDER)
+            st.session_state.folders_cleared = True
+            
+# === Uploads ===
+st.sidebar.header("📁 Upload Files")
+
+jd_input = st.sidebar.file_uploader(
+    "Upload Job Description(s) (TXT, PDF, DOCX or ZIP)",
+    type=["txt", "pdf", "docx", "zip"]
+)
+
+resume_input = st.sidebar.file_uploader(
+    "Upload Resumes (PDF, DOCX or ZIP)",
+    type=["pdf", "docx", "zip"],
+    accept_multiple_files=False
+)
+
+min_match_score = st.sidebar.number_input("Minimum Resume Match Score (%)", min_value=0, max_value=100, value=70)
+
+# Session state
 if "match_reports" not in st.session_state:
     st.session_state.match_reports = {}
 if "selected_profiles" not in st.session_state:
@@ -92,12 +113,16 @@ def extract_files_from_zip(uploaded_zip, save_dir, allowed_ext):
     with zipfile.ZipFile(BytesIO(uploaded_zip.read()), "r") as zip_ref:
         for file_name in zip_ref.namelist():
             if file_name.lower().endswith(tuple(allowed_ext)):
-                full_path = os.path.join(save_dir, file_name)
-                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                # Normalize file name (remove special chars and spaces)
+                safe_name = unicodedata.normalize("NFKD", os.path.basename(file_name)).encode("ascii", "ignore").decode("ascii")
+                safe_name = safe_name.replace(" ", "_")
+                full_path = os.path.join(save_dir, safe_name)
+
                 with open(full_path, "wb") as f:
                     f.write(zip_ref.read(file_name))
                 extracted.append(full_path)
     return extracted
+
 
 def save_file(uploaded_file, save_dir):
     file_path = os.path.join(save_dir, uploaded_file.name)
@@ -105,117 +130,43 @@ def save_file(uploaded_file, save_dir):
         f.write(uploaded_file.getvalue())
     return [file_path]
 
-# Step 1: Upload JD
-jd_input = st.sidebar.file_uploader(
-    "Step 1: Upload Job Description(s) (TXT, PDF, DOCX or ZIP)",
-    type=["txt", "pdf", "docx", "zip"],
-    key=f"jd_uploader_{st.session_state.file_uploader_key}"
-)
+# Pre-process JD file and populate dropdown
+jd_paths = []
+if jd_input:
+    if jd_input.name.endswith(".zip"):
+        jd_paths = extract_files_from_zip(jd_input, JOB_DESC_UPLOAD_FOLDER, ["txt", "pdf", "docx"])
+    else:
+        jd_paths = save_file(jd_input, JOB_DESC_UPLOAD_FOLDER)
 
-# Extract JD skills when JD is uploaded
-extract_skills_button = None
-if jd_input and not st.session_state.extracted_jd_skills:
-    extract_skills_button = st.sidebar.button("Extract Skills from JD")
+jd_file_map = {os.path.basename(path): path for path in jd_paths}
+selected_jd_name = None
+selected_jd_path = None
 
-if extract_skills_button:
+if jd_file_map:
+    selected_jd_name = st.sidebar.selectbox("Select Job Description to Match", list(jd_file_map.keys()))
+    selected_jd_path = jd_file_map[selected_jd_name]
+
+# Processing logic
+if st.sidebar.button("Process Matching"):
     if not (st.session_state.aws_access_key and st.session_state.aws_secret_key and st.session_state.aws_region):
         st.sidebar.error("❌ Please provide AWS credentials and region to extract skills.")
     else:
-        # Set credentials dynamically
         set_bedrock_credentials(st.session_state.aws_access_key, st.session_state.aws_secret_key, st.session_state.aws_region)
-        
-        clear_folder(JOB_DESC_UPLOAD_FOLDER)
-        st.session_state.jd_skills = {}
-        
-        with st.spinner(text="Extracting skills from job description..."):
-            if jd_input.name.endswith(".zip"):
-                st.session_state.jd_paths = extract_files_from_zip(jd_input, JOB_DESC_UPLOAD_FOLDER, ["txt", "pdf", "docx"])
-            else:
-                st.session_state.jd_paths = save_file(jd_input, JOB_DESC_UPLOAD_FOLDER)
-                
-            for jd_path in st.session_state.jd_paths:
-                jd_text = extract_text_from_file(jd_path)
-                jd_name = os.path.splitext(os.path.basename(jd_path))[0].replace(" ", "_")
-                st.session_state.jd_text[jd_name] = jd_text
-                
-                # Extract skills from JD
-                skills = extract_skills(jd_text, 
-                                       st.session_state.aws_access_key, 
-                                       st.session_state.aws_secret_key, 
-                                       st.session_state.aws_region)
-                st.session_state.jd_skills[jd_name] = {skill: {"selected": True, "weight": 1.0} for skill in skills}
-            
-            st.session_state.extracted_jd_skills = True
 
-# Display skills selection after extraction
-if st.session_state.extracted_jd_skills:
-    st.sidebar.subheader("Step 2: Select Required Skills")
-    
-    # Display each JD's skills with selection and weightage
-    for jd_name, skills_dict in st.session_state.jd_skills.items():
-        with st.sidebar.expander(f"Skills from {jd_name}"):
-            st.write(f"Select required skills and assign weightage (1.0 = normal weight)")
-            
-            # First display all skill selections with checkboxes
-            for skill in sorted(skills_dict.keys()):
-                skills_dict[skill]["selected"] = st.checkbox(
-                    f"{skill}", 
-                    value=skills_dict[skill]["selected"],
-                    key=f"skill_{jd_name}_{skill}"
-                )
-            
-            st.write("---")
-            st.write("📊 **Optional: Add Weightage to Skills**")
-            
-            # Then display weightage inputs for selected skills
-            for skill in sorted(skills_dict.keys()):
-                if skills_dict[skill]["selected"]:
-                    skills_dict[skill]["weight"] = st.slider(
-                        f"Weight for {skill}", 
-                        min_value=0.1, 
-                        max_value=5.0, 
-                        value=skills_dict[skill]["weight"],
-                        step=0.1,
-                        key=f"weight_{jd_name}_{skill}"
-                    )
+        clear_folder(SELECTED_PROFILE_FOLDER)
+        st.session_state.match_reports.clear()
+        st.session_state.selected_profiles.clear()
+        st.session_state.processed = False
 
-    # Step 3: Upload Resumes (only show this after skills are extracted)
-    resume_input = st.sidebar.file_uploader(
-        "Step 3: Upload Resumes (PDF, DOCX or ZIP)",
-        type=["pdf", "docx", "zip"],
-        accept_multiple_files=False,
-        key=f"resume_uploader_{st.session_state.file_uploader_key}"
-    )
+        jd_paths = [selected_jd_path] if selected_jd_path else []
+        resume_paths = []
 
-    min_match_score = st.sidebar.number_input("Minimum Resume Match Score (%)", min_value=0, max_value=100, value=70)
-
-    # Step 4: Process
-    process_button = st.sidebar.button("Step 4: Process Matching")
-    
-    # Processing logic
-    if process_button:
-        if not (st.session_state.aws_access_key and st.session_state.aws_secret_key and st.session_state.aws_region):
-            st.error("❌ Please provide AWS credentials and region to proceed.")
-        elif not resume_input:
-            st.error("❌ Please upload resume files to proceed.")
-        else:
-            # Set credentials dynamically
-            set_bedrock_credentials(st.session_state.aws_access_key, st.session_state.aws_secret_key, st.session_state.aws_region)
-
-            clear_folder(RESUME_UPLOAD_FOLDER)
-            clear_folder(SELECTED_PROFILE_FOLDER)
-            st.session_state.match_reports.clear()
-            st.session_state.selected_profiles.clear()
-            st.session_state.processed = False
-
-            resume_paths = []
-
-            with st.spinner(text="Matching in progress..."):
-                if resume_input:
-                    if resume_input.name.endswith(".zip"):
-                        resume_paths = extract_files_from_zip(resume_input, RESUME_UPLOAD_FOLDER, ["pdf", "docx"])
-                    else:
-                        resume_paths = save_file(resume_input, RESUME_UPLOAD_FOLDER)
+        with st.spinner(text="Matching in progress..."):
+            if resume_input:
+                if resume_input.name.endswith(".zip"):
+                    resume_paths = extract_files_from_zip(resume_input, RESUME_UPLOAD_FOLDER, ["pdf", "docx"])
+                else:
+                    resume_paths = save_file(resume_input, RESUME_UPLOAD_FOLDER)
 
                 if not resume_paths:
                     st.warning("Please upload resumes to proceed!")
@@ -225,24 +176,15 @@ if st.session_state.extracted_jd_skills:
                         for path in resume_paths
                     }
 
-                    for jd_name, skills_data in st.session_state.jd_skills.items():
-                        jd_text = st.session_state.jd_text[jd_name]
-                        
-                        # Filter selected skills and their weights
-                        selected_skills = {skill: data["weight"] for skill, data in skills_data.items() if data["selected"]}
-                        
-                        if not selected_skills:
-                            st.warning(f"No skills selected for JD: {jd_name}. Skipping this JD.")
-                            continue
-                        
-                        results = generate_match_report(
-                            resume_texts, 
-                            jd_text, 
-                            selected_skills=selected_skills,
-                            aws_access_key=st.session_state.aws_access_key,
-                            aws_secret_key=st.session_state.aws_secret_key,
-                            aws_region=st.session_state.aws_region
-                        )
+                for jd_path in jd_paths:
+                    jd_text = extract_text_from_file(jd_path)
+                    results = generate_match_report(
+                        resume_texts,
+                        jd_text,
+                        aws_access_key=st.session_state.aws_access_key,
+                        aws_secret_key=st.session_state.aws_secret_key,
+                        aws_region=st.session_state.aws_region
+                    )
 
                         selected_resumes = []
                         detailed_data = []
