@@ -3,6 +3,7 @@ from src.matching import calculate_similarity
 from src.logger import logger
 import time
 from src.matching import calculate_similarity
+from src.bedrock_llm import feedback_generation
 
 def extract_skills(text, aws_access_key, aws_secret_key, aws_region):
     """Use Claude v2 LLM to extract technical skills."""
@@ -34,6 +35,8 @@ def generate_match_report(resume_texts, job_text, aws_access_key, aws_secret_key
         )
         match_score = round((len(matched_skills) / len(jd_skills_lower)) * 100, 2) if jd_skills_lower else 0.0
 
+        feedback = feedback_generation(resume_text, job_text, aws_access_key, aws_secret_key, aws_region)
+
         results.append({
             "resume": resume_name,
             "name" : resume_skills["Name"],
@@ -44,7 +47,8 @@ def generate_match_report(resume_texts, job_text, aws_access_key, aws_secret_key
             "match_score": match_score,
             "all_resume_skills": resume_skills_lower,
             "matched_skills": matched_skills,
-            "missing_skills": missing_skills
+            "missing_skills": missing_skills,
+            "feedback":feedback
         })
 
     return results

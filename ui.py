@@ -164,7 +164,8 @@ if st.sidebar.button("Process Matching"):
                             "Resume Match (%)": result["embedding_score"],
                             "All Resume Skills": ", ".join(sorted(result["all_resume_skills"])),
                             "Matching Skills with JD": ", ".join(sorted(result["matched_skills"])),
-                            "Missing Skills from JD": ", ".join(sorted(result["missing_skills"]))
+                            "Missing Skills from JD": ", ".join(sorted(result["missing_skills"])),
+                            "Feedback":result["feedback"]
                         })
 
                     jd_name = os.path.splitext(os.path.basename(jd_path))[0].replace(" ", "_")
