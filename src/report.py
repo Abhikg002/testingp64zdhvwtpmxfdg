@@ -40,7 +40,6 @@ def generate_match_report(resume_texts, job_text, aws_access_key, aws_secret_key
         results.append({
             "resume": resume_name,
             "name" : resume_skills["Name"],
-            "email": resume_skills["Email"],
             "location":resume_skills["Location"],
             "years of experience": resume_skills["Years of Experience"],
             "embedding_score": embedding_score,
