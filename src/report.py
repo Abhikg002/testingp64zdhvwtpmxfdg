@@ -34,13 +34,14 @@ def generate_match_report(resume_texts, job_text, aws_access_key, aws_secret_key
 
         # Calculate weighted score using only selected skills and their weights
         if selected_skills:
-            matched_selected_skills = list(set(selected_skills.keys()).intersection(set(resume_skills)))
+            matched_selected_skills = list(set(selected_skills.keys()).intersection(set(resume_skills_lower)))
             total_weight = sum(selected_skills.values())  # Sum of all selected skill weights
             weighted_score = sum(selected_skills[skill] for skill in matched_selected_skills)
             weighted_percentage = round((weighted_score / total_weight) * 100, 2) if total_weight > 0 else 0
         else:
             weighted_percentage = 0
         
+        print("Weighted : ", weighted_percentage)
         feedback = feedback_generation(resume_text, job_text, aws_access_key, aws_secret_key, aws_region)
 
         results.append({

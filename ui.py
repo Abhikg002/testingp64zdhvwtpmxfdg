@@ -244,8 +244,7 @@ if st.sidebar.button("Process Matching"):
                         }
                         
                         # Only add weighted score if skills were explicitly selected
-                        if any(st.session_state.get("skill_" + str(idx), False) 
-                               for idx in range(len(st.session_state.extracted_skills))):
+                        if any(st.session_state.get("skill_" + str(idx), False) for idx in range(len(st.session_state.extracted_skills))):
                             data_dict["Weighted Score (%)"] = result["weighted_score"]
                         
                         detailed_data.append(data_dict)
