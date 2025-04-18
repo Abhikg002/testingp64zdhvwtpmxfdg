@@ -5,7 +5,7 @@ import pandas as pd
 import zipfile
 from io import BytesIO
 from src.parser import parse_resume, extract_text_from_file
-from src.report import generate_match_report
+from src.report import generate_match_report,extract_skills
 from src.utils import clear_folder
 from src.bedrock_llm import set_bedrock_credentials  # New utility
 import unicodedata
@@ -19,6 +19,34 @@ SELECTED_PROFILE_FOLDER = "selected_profile/"
 os.makedirs(RESUME_UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(JOB_DESC_UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(SELECTED_PROFILE_FOLDER, exist_ok=True)
+# Function to reset application state
+def reset_application():
+    """Reset all application state and clear uploads."""
+    # Clear session state variables
+    for key in ["jd_skills", "match_reports", "selected_profiles", 
+                "processed", "extracted_jd_skills", "jd_paths", "jd_text"]:
+        if key in st.session_state:
+            if isinstance(st.session_state[key], dict):
+                st.session_state[key] = {}
+            elif isinstance(st.session_state[key], list):
+                st.session_state[key] = []
+            elif isinstance(st.session_state[key], bool):
+                st.session_state[key] = False
+            else:
+                st.session_state[key] = None
+    
+    # Clear file upload widgets by setting their keys to None
+    if "file_uploader_key" not in st.session_state:
+        st.session_state.file_uploader_key = 0
+    st.session_state.file_uploader_key += 1
+    
+    # Clear folders
+    clear_folder(RESUME_UPLOAD_FOLDER)
+    clear_folder(JOB_DESC_UPLOAD_FOLDER)
+    clear_folder(SELECTED_PROFILE_FOLDER)
+    
+    # Force page refresh
+    st.experimental_rerun()
 
 # Title
 st.title("🔍 AI Profile Syncer")
@@ -62,7 +90,14 @@ if "selected_profiles" not in st.session_state:
     st.session_state.selected_profiles = {}
 if "processed" not in st.session_state:
     st.session_state.processed = False
-
+if "extracted_jd_skills" not in st.session_state:
+    st.session_state.extracted_jd_skills = False
+if "jd_paths" not in st.session_state:
+    st.session_state.jd_paths = []
+if "jd_text" not in st.session_state:
+    st.session_state.jd_text = {}
+if "file_uploader_key" not in st.session_state:
+    st.session_state.file_uploader_key = 0
 # Helpers
 def extract_files_from_zip(uploaded_zip, save_dir, allowed_ext):
     extracted = []
@@ -95,12 +130,50 @@ if jd_input:
         jd_paths = save_file(jd_input, JOB_DESC_UPLOAD_FOLDER)
 
 jd_file_map = {os.path.basename(path): path for path in jd_paths}
-selected_jd_name = None
-selected_jd_path = None
+jd_name = None
+jd_path = None
 
 if jd_file_map:
-    selected_jd_name = st.sidebar.selectbox("Select Job Description to Match", list(jd_file_map.keys()))
-    selected_jd_path = jd_file_map[selected_jd_name]
+    selected_jd = st.sidebar.selectbox("Select Job Description to Match", list(jd_file_map.keys()))
+    jd_path = jd_file_map[selected_jd]
+    
+    # Extract skills whenever JD selection changes
+    if "current_jd" not in st.session_state or st.session_state.current_jd != selected_jd:
+        with st.spinner("Extracting skills from Job Description..."):
+            jd_text = extract_text_from_file(jd_path)
+            st.session_state.extracted_skills = extract_skills(
+                jd_text, 
+                st.session_state.aws_access_key,
+                st.session_state.aws_secret_key,
+                st.session_state.aws_region
+            )["Technical Skills"]
+            st.session_state.skill_weights = {skill: 1 for skill in st.session_state.extracted_skills}
+            st.session_state.current_jd = selected_jd
+
+if "extracted_skills" in st.session_state:
+    with st.expander("🎯 Select Required Skills and Assign Weights (Optional)"):
+        st.info("Select specific skills and assign importance (1-5, where 5 is most important). If no skills are selected, all skills will be considered with equal weight.")
+        
+        cols = st.columns(3)
+        selected_skills = {}
+        
+        for idx, skill in enumerate(st.session_state.extracted_skills):
+            col = cols[idx % 3]
+            if col.checkbox(skill, key=f"skill_{idx}"):
+                weight = col.slider(
+                    f"Weight for {skill}", 
+                    min_value=1, 
+                    max_value=10, 
+                    value=st.session_state.skill_weights.get(skill, 1),
+                    key=f"weight_{idx}"
+                )
+                selected_skills[skill] = weight
+        
+        # If no skills are selected, use all skills with default weight of 1
+        if not selected_skills:
+            selected_skills = {skill: 1 for skill in st.session_state.extracted_skills}
+        
+        st.session_state.selected_skills = selected_skills
 
 # Processing logic
 if st.sidebar.button("Process Matching"):
@@ -114,7 +187,7 @@ if st.sidebar.button("Process Matching"):
         st.session_state.selected_profiles.clear()
         st.session_state.processed = False
 
-        jd_paths = [selected_jd_path] if selected_jd_path else []
+        jd_paths = [jd_path] if jd_path else []
         resume_paths = []
 
         with st.spinner(text="Matching in progress..."):
@@ -139,7 +212,8 @@ if st.sidebar.button("Process Matching"):
                         jd_text,
                         aws_access_key=st.session_state.aws_access_key,
                         aws_secret_key=st.session_state.aws_secret_key,
-                        aws_region=st.session_state.aws_region
+                        aws_region=st.session_state.aws_region,
+                        selected_skills=st.session_state.selected_skills
                     )
 
                     selected_resumes = []
@@ -154,7 +228,8 @@ if st.sidebar.button("Process Matching"):
                                 with open(src_path, "rb") as src, open(dst_path, "wb") as dst:
                                     dst.write(src.read())
 
-                        detailed_data.append({
+                        # Create base data dictionary without weighted score
+                        data_dict = {
                             "Resume": result["resume"],
                             "Name": result["name"],
                             "Email": result["email"],
@@ -166,7 +241,14 @@ if st.sidebar.button("Process Matching"):
                             "Matching Skills with JD": ", ".join(sorted(result["matched_skills"])),
                             "Missing Skills from JD": ", ".join(sorted(result["missing_skills"])),
                             "Feedback":result["feedback"]
-                        })
+                        }
+                        
+                        # Only add weighted score if skills were explicitly selected
+                        if any(st.session_state.get("skill_" + str(idx), False) 
+                               for idx in range(len(st.session_state.extracted_skills))):
+                            data_dict["Weighted Score (%)"] = result["weighted_score"]
+                        
+                        detailed_data.append(data_dict)
 
                     jd_name = os.path.splitext(os.path.basename(jd_path))[0].replace(" ", "_")
                     st.session_state.match_reports[jd_name] = pd.DataFrame(detailed_data)
@@ -175,6 +257,11 @@ if st.sidebar.button("Process Matching"):
 
 # Display Results
 if st.session_state.processed:
+    st.header("Results")
+    
+    # Add a clear results button in the main area too
+    if st.sidebar.button("🧹 Clear Results", help="Clear all results and start over"):
+        reset_application()
     for jd_name, match_df in st.session_state.match_reports.items():
         st.subheader(f"📊 Matching Report for JD: {jd_name}")
         st.dataframe(match_df)

@@ -10,18 +10,15 @@ def extract_skills(text, aws_access_key, aws_secret_key, aws_region):
     return run_skill_extraction_prompt(text, aws_access_key, aws_secret_key, aws_region)
 
 
-def generate_match_report(resume_texts, job_text, aws_access_key, aws_secret_key, aws_region):
+def generate_match_report(resume_texts, job_text, aws_access_key, aws_secret_key, aws_region, selected_skills):
     results = []
     logger.info("Extracting skills from job description")
     jd_skills = run_skill_extraction_prompt(job_text, aws_access_key, aws_secret_key, aws_region)
     jd_skills_lower = {skill.lower() for skill in jd_skills["Technical Skills"]}
 
     for resume_name, resume_text in resume_texts.items():
-        if not resume_text.strip():
-            print(f"⚠️ Empty text extracted from resume: {resume_name}, skipping.")
-            continue
-        if not job_text.strip():
-            print(f"⚠️ Empty job description text, skipping matching.")
+        if not resume_text.strip() or not job_text.strip():
+            print(f"⚠️ Empty text extracted from resume or from job description, skipping matching.")
             continue
 
         resume_skills = run_skill_extraction_prompt(resume_text, aws_access_key, aws_secret_key, aws_region)
@@ -29,12 +26,21 @@ def generate_match_report(resume_texts, job_text, aws_access_key, aws_secret_key
 
         matched_skills = list(set(jd_skills_lower).intersection(set(resume_skills_lower)))
         missing_skills = list(set(jd_skills_lower) - set(resume_skills_lower))
-
+        match_score = round((len(matched_skills) / len(jd_skills_lower)) * 100, 2) if jd_skills_lower else 0.0
+        
         embedding_score = round(
             calculate_similarity(resume_text, job_text, aws_access_key, aws_secret_key, aws_region) * 100, 2
         )
-        match_score = round((len(matched_skills) / len(jd_skills_lower)) * 100, 2) if jd_skills_lower else 0.0
 
+        # Calculate weighted score using only selected skills and their weights
+        if selected_skills:
+            matched_selected_skills = list(set(selected_skills.keys()).intersection(set(resume_skills)))
+            total_weight = sum(selected_skills.values())  # Sum of all selected skill weights
+            weighted_score = sum(selected_skills[skill] for skill in matched_selected_skills)
+            weighted_percentage = round((weighted_score / total_weight) * 100, 2) if total_weight > 0 else 0
+        else:
+            weighted_percentage = 0
+        
         feedback = feedback_generation(resume_text, job_text, aws_access_key, aws_secret_key, aws_region)
 
         results.append({
@@ -48,7 +54,8 @@ def generate_match_report(resume_texts, job_text, aws_access_key, aws_secret_key
             "all_resume_skills": resume_skills_lower,
             "matched_skills": matched_skills,
             "missing_skills": missing_skills,
-            "feedback":feedback
+            "feedback":feedback,
+            "weighted_score": weighted_percentage
         })
 
     return results
