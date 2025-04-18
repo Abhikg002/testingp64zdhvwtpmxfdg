@@ -19,6 +19,34 @@ SELECTED_PROFILE_FOLDER = "selected_profile/"
 os.makedirs(RESUME_UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(JOB_DESC_UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(SELECTED_PROFILE_FOLDER, exist_ok=True)
+# Function to reset application state
+def reset_application():
+    """Reset all application state and clear uploads."""
+    # Clear session state variables
+    for key in ["jd_skills", "match_reports", "selected_profiles", 
+                "processed", "extracted_jd_skills", "jd_paths", "jd_text"]:
+        if key in st.session_state:
+            if isinstance(st.session_state[key], dict):
+                st.session_state[key] = {}
+            elif isinstance(st.session_state[key], list):
+                st.session_state[key] = []
+            elif isinstance(st.session_state[key], bool):
+                st.session_state[key] = False
+            else:
+                st.session_state[key] = None
+    
+    # Clear file upload widgets by setting their keys to None
+    if "file_uploader_key" not in st.session_state:
+        st.session_state.file_uploader_key = 0
+    st.session_state.file_uploader_key += 1
+    
+    # Clear folders
+    clear_folder(RESUME_UPLOAD_FOLDER)
+    clear_folder(JOB_DESC_UPLOAD_FOLDER)
+    clear_folder(SELECTED_PROFILE_FOLDER)
+    
+    # Force page refresh
+    st.experimental_rerun()
 
 # Title
 st.title("🔍 AI Profile Syncer")
@@ -62,7 +90,14 @@ if "selected_profiles" not in st.session_state:
     st.session_state.selected_profiles = {}
 if "processed" not in st.session_state:
     st.session_state.processed = False
-
+if "extracted_jd_skills" not in st.session_state:
+    st.session_state.extracted_jd_skills = False
+if "jd_paths" not in st.session_state:
+    st.session_state.jd_paths = []
+if "jd_text" not in st.session_state:
+    st.session_state.jd_text = {}
+if "file_uploader_key" not in st.session_state:
+    st.session_state.file_uploader_key = 0
 # Helpers
 def extract_files_from_zip(uploaded_zip, save_dir, allowed_ext):
     extracted = []
@@ -217,6 +252,11 @@ if st.sidebar.button("Process Matching"):
 
 # Display Results
 if st.session_state.processed:
+    st.header("Results")
+    
+    # Add a clear results button in the main area too
+    if st.sidebar.button("🧹 Clear Results", help="Clear all results and start over"):
+        reset_application()
     for jd_name, match_df in st.session_state.match_reports.items():
         st.subheader(f"📊 Matching Report for JD: {jd_name}")
         st.dataframe(match_df)
