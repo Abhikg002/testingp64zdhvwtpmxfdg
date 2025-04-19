@@ -14,3 +14,6 @@ temp.py
 temp4_parser.py
 #files
 Matching_Process.txt
+#virtual env
+myenv
+.idea

@@ -156,11 +156,15 @@ if st.sidebar.button("Process Matching"):
 
                         detailed_data.append({
                             "Resume": result["resume"],
+                            "Name": result["name"],
+                            "Location": result["location"],
+                            "Years of Experience": result["years of experience"],
                             "Skills Match (%)": result["match_score"],
                             "Resume Match (%)": result["embedding_score"],
                             "All Resume Skills": ", ".join(sorted(result["all_resume_skills"])),
                             "Matching Skills with JD": ", ".join(sorted(result["matched_skills"])),
-                            "Missing Skills from JD": ", ".join(sorted(result["missing_skills"]))
+                            "Missing Skills from JD": ", ".join(sorted(result["missing_skills"])),
+                            "Suggestion from LLM":result["feedback"]
                         })
 
                     jd_name = os.path.splitext(os.path.basename(jd_path))[0].replace(" ", "_")
