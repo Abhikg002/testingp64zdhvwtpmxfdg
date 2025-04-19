@@ -82,3 +82,50 @@ Assistant:"""
                 time.sleep(wait_time)
             else:
                 raise e
+
+
+def invoke_claude_model(prompt, aws_access_key, aws_secret_key, aws_region, max_tokens=1000, temperature=0.2, retries=3):
+    """
+    Invokes Claude v2 with a general-purpose prompt (used for employee-demand matching).
+    Returns the plain text response from the model.
+    """
+    client = boto3.client(
+        service_name='bedrock-runtime',
+        aws_access_key_id=aws_access_key,
+        aws_secret_access_key=aws_secret_key,
+        region_name=aws_region
+    )
+
+    model_id = 'anthropic.claude-v2'
+    accept = 'application/json'
+    content_type = 'application/json'
+
+    body = json.dumps({
+        "prompt": f"Human: {prompt}\n\nAssistant:",
+        "max_tokens_to_sample": max_tokens,
+        "temperature": temperature,
+        "top_p": 0.9,
+    })
+
+    for attempt in range(retries):
+        try:
+            response = client.invoke_model(
+                body=body,
+                modelId=model_id,
+                accept=accept,
+                contentType=content_type,
+            )
+            response_body = json.loads(response['body'].read())
+            output_text = response_body.get('completion', '').strip()
+
+            logger.info(f"[Claude] Prompt executed successfully.")
+            return output_text
+
+        except botocore.exceptions.ClientError as e:
+            if attempt < retries - 1:
+                wait_time = 2 ** attempt
+                print(f"[Claude] Retry {attempt+1}/{retries}: waiting {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"[Claude] Failed after {retries} attempts.")
+                raise e
